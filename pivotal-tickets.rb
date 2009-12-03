@@ -19,9 +19,11 @@ def git_exists?
 end
 
 def git_branch_name(idx, story)
+  ticket_string = (story.description =~ /Reference:.*\/ticket\/([0-9]+)/ ? "tick#{$1}_" : "")
   _,_,branch_name = (cnt, all_branches, branch_name_base = 
-    1, git_all_branches, "story%03d_%s" % [idx, 
-                                           story.name.gsub(/[^[:alpha:][:digit:]]/,'_')])
+    1, git_all_branches, "%sstory%03d_%s" % [ticket_string,
+                                             idx, 
+                                             story.name.gsub(/[^[:alpha:][:digit:]]/,'_')])
   while all_branches.include?(branch_name)
     branch_name = "%s.v%02d" % [branch_name_base, cnt += 1]
   end
@@ -59,7 +61,9 @@ DEFAULT_PROJECT=c["default_project"]
 @notassigned     = false
 @gitticket       = nil
 @gitrename       = nil
-@open_with_app   = nil
+@open_with_app = nil
+@comment_story = nil
+@comment_text  = []
 
 opts = OptionParser.new do |o|
   o.program_name = 'ruby pivotal-tickets.rb'
@@ -82,7 +86,11 @@ opts = OptionParser.new do |o|
 #     @filter = eval(t=("/^#(%s)/" % tickets.split(',').
 #                    collect {|a| "%03d" % a.to_i }.join('|')))
 #   end
-  
+  o.on('--comment NUM','-c','Read the comment for a ticket from the command line') do |@comment_story|
+    while ( (line = STDIN.gets) && !(/^[.]$/.match(line))) do 
+      @comment_text << line 
+    end
+  end
   o.on_tail('--help', '-h', 'Show this message') do
     puts opts
     exit
@@ -125,12 +133,6 @@ report_id = @report_id || opts[:report_id]
 
 tickets,summaries,ticket_rows = [],[],[]
 
-# incase descriptoin or summary contain a double-quote (which faster csv assumes 
-# is a quote char) replace it with a single quote.
-# It seems that trac does not escape nor escape itself therefore double quotes will
-# not appear in trac CSV. .gsub(/"/,"'")
-puts content.split("\n")[0] if @debug
-
 module ToOutput
   def charlimit(str,to=50)
     str_len = (str || "").length
@@ -162,21 +164,22 @@ PT_BASE_URL = "http://www.pivotaltracker.com"
 end
 Story.send(:include, ToOutput)
 
-puts "====>>> Active Story for: #{@project_name} <<<===="
-(stories = Story.
- find(:all, :params => {:project_id => opts[:pivotal_project_id]}).
- select do |story|
-   true
- end).each do |story|
-  y story if @debug
-  puts story.to_row
-  system("open -a %s %s/stories/%s" % [@open_with_app, 
-                                       PT_BASE_URL, story.id]) if !@open_with_app.nil?
+unless @comment_story
+  puts "====>>> Active Story for: #{@project_name} <<<===="
+  (stories = Story.
+   find(:all, :params => {:project_id => opts[:pivotal_project_id]}).
+   select do |story|
+     true
+   end).each do |story|
+    y story if @debug
+    puts story.to_row
+    system("open -a %s %s/story/show/%s" % [@open_with_app, 
+                                            PT_BASE_URL, 
+                                            story.id]) if !@open_with_app.nil?
 
+  end
+  puts "====>>> Tickets for: %s Total %d <<<====" % [@project_name, stories.size]
 end
-
-cnt=0
-puts "====>>> Tickets for: %s Total %d <<<====" % [@project_name, stories.size]
 
 ## git stuff. either check out with new branch or rename current branch.
 if @gitticket and git_exists?
@@ -195,3 +198,35 @@ if @gitrename and git_exists?
   exit
 end
 
+# TODO use some sort of lib for this.
+def xml_escape(input)
+   result = input.dup
+   result.gsub!(/[&<>'"]/) do | match |
+     case match
+     when '&' then '&amp;'
+     when '<' then '&lt;'
+     when '>' then '&gt;'
+     when "'" then '&apos;'
+     when '"' then '&quote;'
+     end
+   end
+   result
+end
+
+if @comment_story
+  idx = @comment_story.to_i
+  puts "Adding comment to story #{idx}"
+  story = Story.find(idx, :params => {:project_id => opts[:pivotal_project_id]})
+  exit_if_story_not_open(story)
+  (File.open("/tmp/pt-post-data.txt", "wb") << (<<-EOF)).close
+    <note><text>
+       #{xml_escape(@comment_text.join("\n"))}
+    </text></note>
+  EOF
+  # TODO get this working with ActiveResource ....
+  system(("curl -H \"X-TrackerToken: %s\" -H \"Content-type: application/xml\" " +
+          "-d @/tmp/pt-post-data.txt " +
+          "-X POST %s/services/v2/projects/%s/stories/%s/notes") % \
+         [opts[:pivotal_api_token], PT_BASE_URL, opts[:pivotal_project_id],
+          story.id] )
+end
