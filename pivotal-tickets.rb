@@ -52,18 +52,20 @@ PROJECTS = (c=YAML.load(File.open(File.expand_path("~/.trac-tickets")).read)).
 end
 DEFAULT_PROJECT=c["default_project"]
 
-@project_name    = nil
-@report_id       = nil
-@password        = nil
-@show_tickets    = [] # this is actually show ticket details
-@debug           = false
-@filter          = /./
-@notassigned     = false
-@gitticket       = nil
-@gitrename       = nil
+@project_name  = nil
+@report_id     = nil
+@password      = nil
+@show_tickets  = [] # this is actually show ticket details
+@debug         = false
+@filter        = /./
+@notassigned   = false
+@gitticket     = nil
+@gitrename     = nil
 @open_with_app = nil
 @comment_story = nil
 @comment_text  = []
+@start_story   = nil
+@finish_story  = nil
 
 opts = OptionParser.new do |o|
   o.program_name = 'ruby pivotal-tickets.rb'
@@ -74,7 +76,10 @@ opts = OptionParser.new do |o|
   o.on('--debug',               '-d', 'activate debug') { @debug   = true }
   
   o.on('--gitrename NUM',       '-m', 'rename current git branch to ticket') {|@gitrename| }
-  o.on('--branch NUM',          '-b', 'create a git branch for ticket num') { |@gitticket| }
+  o.on('--branch NUM',          '-b', 'create a git branch for ticket num') do |@gitticket| 
+    @start_story = @gitticket
+  end
+  
 #   o.on('--show-ticket NUM',     '-s', 'show all info on ticket. Comma separated') do |t| 
 #     @show_tickets << t.split(',').collect { |a| a.to_i }
 #   end
@@ -91,6 +96,10 @@ opts = OptionParser.new do |o|
       @comment_text << line 
     end
   end
+  
+  o.on('--start-story NUM','-x','Start a story') { |@start_story| }
+  o.on('--finish-story NUM','-y','Finish a story') { |@finish_story| }
+  
   o.on_tail('--help', '-h', 'Show this message') do
     puts opts
     exit
@@ -230,3 +239,13 @@ if @comment_story
          [opts[:pivotal_api_token], PT_BASE_URL, opts[:pivotal_project_id],
           story.id] )
 end
+
+if @start_story or @finish_story
+  idx = (@start_story || @finish_story).to_i
+  puts "%s story #{idx}" % (@finish_story ? "Finishing" : "Starting")
+  story = Story.find(idx, :params => {:project_id => opts[:pivotal_project_id]})
+  exit_if_story_not_open(story)
+  story.current_state = (@finish_story ? "finished" : "started")
+  puts story.save
+end
+
