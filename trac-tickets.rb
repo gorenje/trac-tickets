@@ -94,13 +94,13 @@ opts = OptionParser.new do |o|
   o.program_name = 'ruby fb.rb'
   o.separator 'Options:'
   o.on('--project PROJECTNAME', '-p', 'Project name') { |@project_name| }
-  o.on('--report REPORT_NUM',   '-r', 'Report id') { |@report_id| }
-  o.on('--password PASSWORD',   '-u', 'Report id') { |@password| }
-  o.on('--quote-quotes',        '-q', 'Report id') { @quote_quotes = true }
+  o.on('--report REPORT_NUM',   '-r', 'Trac Report id to use (normally 1)') { |@report_id| }
+  o.on('--password PASSWORD',   '-u', 'Trac password') { |@password| }
+  o.on('--quote-quotes',        '-q', 'Escape quotes') { @quote_quotes = true }
   o.on('--debug',               '-d', 'activate debug') { @debug   = true }
   
   o.on('--gitrename NUM',       '-m', 'rename current git branch to ticket') {|@gitrename| }
-  o.on('--branch NUM',          '-b', 'create a git branch for ticket num') { |@gitticket| }
+  o.on('--gitbranch NUM',       '-b', 'create a git branch for ticket num') { |@gitticket| }
   o.on('--show-ticket NUM',     '-s', 'show all info on ticket. Comma separated') do |t| 
     @show_tickets << t.split(',').collect { |a| a.to_i }
   end

@@ -53,8 +53,6 @@ end
 DEFAULT_PROJECT=c["default_project"]
 
 @project_name  = nil
-@report_id     = nil
-@password      = nil
 @show_tickets  = [] # this is actually show ticket details
 @debug         = false
 @filter        = /./
@@ -71,12 +69,10 @@ opts = OptionParser.new do |o|
   o.program_name = 'ruby pivotal-tickets.rb'
   o.separator 'Options:'
   o.on('--project PROJECTNAME', '-p', 'Project name') { |@project_name| }
-  o.on('--report REPORT_NUM',   '-r', 'Report id') { |@report_id| }
-  o.on('--password PASSWORD',   '-u', 'Report id') { |@password| }
   o.on('--debug',               '-d', 'activate debug') { @debug   = true }
   
   o.on('--gitrename NUM',       '-m', 'rename current git branch to ticket') {|@gitrename| }
-  o.on('--branch NUM',          '-b', 'create a git branch for ticket num') do |@gitticket| 
+  o.on('--gitbranch NUM',       '-b', 'create a git branch for ticket num') do |@gitticket| 
     @start_story = @gitticket
   end
   
