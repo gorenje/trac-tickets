@@ -196,7 +196,6 @@ if @gitticket and git_exists?
   story = Story.find(idx, :params => {:project_id => opts[:pivotal_project_id]})
   exit_if_story_not_open(story)
   `git co -b #{git_branch_name(idx,story)}`
-  exit
 end
 
 if @gitrename and git_exists?
@@ -204,7 +203,6 @@ if @gitrename and git_exists?
   story = Story.find(idx, :params => {:project_id => opts[:pivotal_project_id]})
   exit_if_story_not_open(story)
   `git branch -m #{git_branch_name(idx,story)}`
-  exit
 end
 
 # TODO use some sort of lib for this.
