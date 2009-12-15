@@ -37,12 +37,28 @@ def exit_if_story_not_open(story)
   end
 end
 
+def change_state_for_story(state,story_id,opts)
+  idx = story_id.to_i
+  puts "%s story #{idx}" % { "started" => "Starting", 
+                             "finished" => "Finishing", 
+                             "delivered" => "Delivering"}[state]
+  story = Story.find(idx, :params => {:project_id => opts[:pivotal_project_id]})
+  if story.nil?
+    puts "Unable to find story with id #{story_id}, cant move to #{state}"
+    return
+  end
+  story.current_state = state
+  story.owned_by = opts[:pivotal_me] if "started" == state
+  puts "Story #{story_id} moved to #{state} ==> #{story.save}"
+end
+
 DEFAULT_PROJECT_SETTINGS = { 
   :user              => nil,         :password           => nil, 
   :server            => "localhost", :report_id  => 1,
   :ssl               => true,        :url_trac_prefix    => "trac",
   :path_regexp       => nil,         :component          => nil,
   :pivotal_api_token => nil,         :pivotal_project_id => nil,
+  :pivotal_me        => nil,
 }
 
 # before merging the default values, need to convert the keys to symbols.
@@ -64,6 +80,8 @@ DEFAULT_PROJECT=c["default_project"]
 @comment_text  = []
 @start_story   = nil
 @finish_story  = nil
+@deliver_story = nil
+@only_me = false
 
 opts = OptionParser.new do |o|
   o.program_name = 'ruby pivotal-tickets.rb'
@@ -76,9 +94,9 @@ opts = OptionParser.new do |o|
     @start_story = @gitticket
   end
   
-#   o.on('--show-ticket NUM',     '-s', 'show all info on ticket. Comma separated') do |t| 
-#     @show_tickets << t.split(',').collect { |a| a.to_i }
-#   end
+  o.on('--show-ticket NUM',     '-s', 'show all info on ticket. Comma separated') do |t| 
+    @show_tickets << t.split(',').collect { |a| a.to_i }
+  end
 #   o.on('--filter-on REGEXP',    '-f', 'filter string') { |a| @filter = eval a }
 #   o.on('--not-assigned',        '-x', 'show tickets that are not assigned') { |@notassigned| }
   o.on('--open APP',            '-o', 'open ticket with the app. App is passed the URL of the ticket') {  |@open_with_app| }
@@ -95,6 +113,8 @@ opts = OptionParser.new do |o|
   
   o.on('--start-story NUM','-x','Start a story') { |@start_story| }
   o.on('--finish-story NUM','-y','Finish a story') { |@finish_story| }
+  o.on('--deliver-story NUM','-z','Deliver a story') { |@deliver_story| }
+  o.on('--only-me',nil, 'Show only my stories') { @only_me = true }
   
   o.on_tail('--help', '-h', 'Show this message') do
     puts opts
@@ -121,7 +141,7 @@ opts.parse!(ARGV)
 end
 opts = PROJECTS[@project_name]
 raise "No project specified" if opts.nil? || opts.empty?
-
+@only_me = opts[:pivotal_me] if @only_me
 @component_filter = opts[:component]
 @password = @password || opts[:password]
 
@@ -139,6 +159,17 @@ report_id = @report_id || opts[:report_id]
 tickets,summaries,ticket_rows = [],[],[]
 
 module ToOutput
+  def owner
+    (self.respond_to?(:owned_by) && self.owned_by)
+  end
+  def requestor
+    (self.respond_to?(:requested_by) && self.requested_by)
+  end
+  
+  def for_me?(me)
+    me.nil? || self.owner == me || self.requestor == me
+  end
+  
   def charlimit(str,to=50)
     str_len = (str || "").length
     str = (str ? str[0..(to-1)].gsub(/[\n\r]/," ") : "")
@@ -147,13 +178,14 @@ module ToOutput
 
   def to_row( overrides = { })
     # 060 does not limit the string to max 60, chars therefore the substring below.
-    sprintf("#%07d - (%s) (%s) (%s) [%s] %s\n", 
+    sprintf("#%07d - (%s) (%s) (%s) (%s) [%s] %s\n", 
       self.id, 
       charlimit((overrides[:milestone]  || self.current_state|| ""),10) .ljust(10, ' '), 
       charlimit((overrides[:component]  || self.story_type|| ""),8).ljust(8, ' '), 
-      charlimit((overrides[:owner]      || self.requested_by || ""),9).ljust(9, ' '), 
-      charlimit((overrides[:summary]    || self.name || ""),60).ljust(60, ' '),
-      charlimit(overrides[:description] || self.description), 50)
+      charlimit((overrides[:requested_by] || self.requestor || ""),9).ljust(9, ' '), 
+      charlimit((overrides[:owned_by] || self.owner ||""),9).ljust(9, ' '), 
+      charlimit((overrides[:summary]    || self.name || ""),50).ljust(50, ' '),
+      charlimit(overrides[:description] || self.description), 40)
   end
 end
 
@@ -169,21 +201,29 @@ PT_BASE_URL = "http://www.pivotaltracker.com"
 end
 Story.send(:include, ToOutput)
 
+filter = []
+#filter << ["requested_by:'Gerrit Riessen'"] if @only_me
+#filter << ["owned_by:/Gerrit Riessen/"] if @only_me
+filter = filter.empty? ? {} : {:filter => filter.join(" ")}
+
+(@start_story  ||"").split(",").each { |st_id| change_state_for_story("started",  st_id, opts) }
+(@finish_story ||"").split(",").each { |st_id| change_state_for_story("finished", st_id, opts) }
+(@deliver_story||"").split(",").each { |st_id| change_state_for_story("delivered",st_id, opts) }
 unless @comment_story
   puts "====>>> Active Story for: #{@project_name} <<<===="
   (stories = Story.
-   find(:all, :params => {:project_id => opts[:pivotal_project_id]}).
+   find(:all, :params => {:project_id => opts[:pivotal_project_id]}.merge(filter)).
    select do |story|
-     true
+     @show_tickets.empty? ? (@only_me ? story.for_me?(@only_me) : true) : @show_tickets.include?(story.id) 
    end).each do |story|
-    y story if @debug
+    y story if @debug or @show_tickets.include?(story.id) 
     puts story.to_row
     system("open -a %s %s/story/show/%s" % [@open_with_app, 
                                             PT_BASE_URL, 
                                             story.id]) if !@open_with_app.nil?
 
   end
-  puts "====>>> Tickets for: %s Total %d <<<====" % [@project_name, stories.size]
+  puts "====>>> Stories for: %s Total %d <<<====" % [@project_name, stories.size]
 end
 
 ## git stuff. either check out with new branch or rename current branch.
@@ -227,19 +267,10 @@ if @comment_story
     </text></note>
   EOF
   # TODO get this working with ActiveResource ....
-  system(("curl -H \"X-TrackerToken: %s\" -H \"Content-type: application/xml\" " +
+  system(("curl --max-time 15 -H \"X-TrackerToken: %s\" -H \"Content-type: application/xml\" " +
           "-d @/tmp/pt-post-data.txt " +
           "-X POST %s/services/v2/projects/%s/stories/%s/notes") % \
          [opts[:pivotal_api_token], PT_BASE_URL, opts[:pivotal_project_id],
           story.id] )
-end
-
-if @start_story or @finish_story
-  idx = (@start_story || @finish_story).to_i
-  puts "%s story #{idx}" % (@finish_story ? "Finishing" : "Starting")
-  story = Story.find(idx, :params => {:project_id => opts[:pivotal_project_id]})
-  exit_if_story_not_open(story)
-  story.current_state = (@finish_story ? "finished" : "started")
-  puts story.save
 end
 
