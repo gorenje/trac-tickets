@@ -38,9 +38,10 @@ def git_exists?
   system('git branch 2>/dev/null >/dev/null')
 end
 
-def git_branch_name(idx, ticket)
+def git_branch_name(ticket_nums, ticket)
+  idx = ticket_nums.split(/,/).collect { |a| "%03d" % a.to_i }.join("+")
   _,_,branch_name = (cnt, all_branches, branch_name_base = 
-    1, git_all_branches, "tick%03d_%s" % [idx, ticket.gsub(/[^[:alpha:][:digit:]]/,'_')])
+    1, git_all_branches, "tick%s_%s" % [idx, ticket.gsub(/[^[:alpha:][:digit:]]/,'_')])
   while all_branches.include?(branch_name)
     branch_name = "%s.v%02d" % [branch_name_base, cnt += 1]
   end
@@ -230,19 +231,15 @@ end
 puts "====>>> Tickets for: %s Total %d <<<====" % [@project_name, cnt]
 
 ## git stuff. either check out with new branch or rename current branch.
-if @gitticket and git_exists?
-  idx = @gitticket.to_i
+if git_exists? and (@gitrename or @gitticket)
+  idx = (@gitticket || @gitrename).split(/,/).first.to_i
   ticket = summaries[idx]
   exit_if_ticket_not_open(ticket)
-  `git co -b #{git_branch_name(idx,ticket)}`
-  exit
-end
-
-if @gitrename and git_exists?
-  idx = @gitrename.to_i
-  ticket = summaries[idx]
-  exit_if_ticket_not_open(ticket)
-  `git branch -m #{git_branch_name(idx,ticket)}`
+  if @gitticket
+    `git co -b #{git_branch_name(@gitticket,ticket)}`
+  else
+    `git branch -m #{git_branch_name(@gitrename,ticket)}`
+  end
   exit
 end
 

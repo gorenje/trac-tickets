@@ -52,6 +52,10 @@ def change_state_for_story(state,story_id,opts)
   puts "Story #{story_id} moved to #{state} ==> #{story.save}"
 end
 
+def generate_link(base_url, story_num)
+   "%s/story/show/%s" % [base_url, story_num]
+end
+
 DEFAULT_PROJECT_SETTINGS = { 
   :user              => nil,         :password           => nil, 
   :server            => "localhost", :report_id  => 1,
@@ -67,6 +71,7 @@ PROJECTS = (c=YAML.load(File.open(File.expand_path("~/.trac-tickets")).read)).
   key == "default_project" ? t : t.merge!(key => DEFAULT_PROJECT_SETTINGS.merge(value))
 end
 DEFAULT_PROJECT=c["default_project"]
+PT_BASE_URL = "http://www.pivotaltracker.com"
 
 @project_name  = nil
 @show_tickets  = [] # this is actually show ticket details
@@ -111,6 +116,11 @@ opts = OptionParser.new do |o|
     end
   end
   
+  o.on('--link NUM','-l','Generate a link to the pivotal story and exit') do |link_story|
+    puts generate_link(PT_BASE_URL, link_story)
+    exit
+  end
+
   o.on('--start-story NUM','-x','Start a story') { |@start_story| }
   o.on('--finish-story NUM','-y','Finish a story') { |@finish_story| }
   o.on('--deliver-story NUM','-z','Deliver a story') { |@deliver_story| }
@@ -165,7 +175,10 @@ module ToOutput
   def requestor
     (self.respond_to?(:requested_by) && self.requested_by)
   end
-  
+  def points
+    ((self.respond_to?(:estimate) && self.estimate) || "").to_s
+  end
+
   def for_me?(me)
     me.nil? || self.owner == me || self.requestor == me
   end
@@ -173,15 +186,16 @@ module ToOutput
   def charlimit(str,to=50)
     str_len = (str || "").length
     str = (str ? str[0..(to-1)].gsub(/[\n\r]/," ") : "")
-    str_len > to ? str.gsub(/...$/,"...") : str
+    (str_len > to and to >= 5) ? str.gsub(/...$/,"...") : str
   end
 
   def to_row( overrides = { })
     # 060 does not limit the string to max 60, chars therefore the substring below.
-    sprintf("#%07d - (%s) (%s) (%s) (%s) [%s] %s\n", 
+    sprintf("#%07d - (%s) (%s) [%s] (%s) (%s) [%s] %s\n", 
       self.id, 
-      charlimit((overrides[:milestone]  || self.current_state|| ""),10) .ljust(10, ' '), 
-      charlimit((overrides[:component]  || self.story_type|| ""),8).ljust(8, ' '), 
+      charlimit((overrides[:milestone]  || self.current_state|| ""),8) .ljust(8, ' '), 
+      charlimit((overrides[:component]  || self.story_type|| ""),4).ljust(4, ' '), 
+      charlimit((overrides[:estimate]  || self.points || ""), 1).ljust(1, ' '),
       charlimit((overrides[:requested_by] || self.requestor || ""),9).ljust(9, ' '), 
       charlimit((overrides[:owned_by] || self.owner ||""),9).ljust(9, ' '), 
       charlimit((overrides[:summary]    || self.name || ""),50).ljust(50, ' '),
@@ -189,7 +203,6 @@ module ToOutput
   end
 end
 
-PT_BASE_URL = "http://www.pivotaltracker.com"
 # create the required story class
 ["Story", "Note", "Task"].each do |class_name|
   eval(<<-EOF % [opts[:pivotal_project_id], opts[:pivotal_api_token]])
@@ -218,9 +231,8 @@ unless @comment_story
    end).each do |story|
     y story if @debug or @show_tickets.include?(story.id) 
     puts story.to_row
-    system("open -a %s %s/story/show/%s" % [@open_with_app, 
-                                            PT_BASE_URL, 
-                                            story.id]) if !@open_with_app.nil?
+    system("open -a %s %s" % [@open_with_app, 
+                              generate_link(PT_BASE_URL, story.id)]) if !@open_with_app.nil?
 
   end
   puts "====>>> Stories for: %s Total %d <<<====" % [@project_name, stories.size]
