@@ -1,4 +1,5 @@
 #!/usr/bin/ruby
+# -*- coding: utf-8 -*-
 
 # TODOS:
 #  - Other reports have different sorting of fields in the CSV, this script assumes a specific
@@ -169,6 +170,12 @@ report_id = @report_id || opts[:report_id]
 tickets,summaries,ticket_rows = [],[],[]
 
 module ToOutput
+  def self.included(base)
+    base.class_eval <<-EOF
+      cattr_accessor :story_to_iteration
+    EOF
+  end
+
   def owner
     (self.respond_to?(:owned_by) && self.owned_by)
   end
@@ -182,7 +189,12 @@ module ToOutput
   def for_me?(me)
     me.nil? || self.owner == me || self.requestor == me
   end
-  
+
+  def iteration
+    @@story_to_iteration ||= self.class.story_to_iteration
+    @@story_to_iteration[self.id] || "-"
+  end
+
   def charlimit(str,to=50)
     str_len = (str || "").length
     str = (str ? str[0..(to-1)].gsub(/[\n\r]/," ") : "")
@@ -191,8 +203,8 @@ module ToOutput
 
   def to_row( overrides = { })
     # 060 does not limit the string to max 60, chars therefore the substring below.
-    sprintf("#%07d - (%s) (%s) [%s] (%s) (%s) [%s] %s\n", 
-      self.id, 
+    sprintf("#%07d %s (%s) (%s) [%s] (%s) (%s) [%s] %s\n", 
+      self.id, self.iteration,
       charlimit((overrides[:milestone]  || self.current_state|| ""),8) .ljust(8, ' '), 
       charlimit((overrides[:component]  || self.story_type|| ""),4).ljust(4, ' '), 
       charlimit((overrides[:estimate]  || self.points || ""), 1).ljust(1, ' '),
@@ -203,8 +215,9 @@ module ToOutput
   end
 end
 
-# create the required story class
-["Story", "Note", "Task"].each do |class_name|
+# create the ActiveResource class required. Done dynamically so that the 
+# api token can be inserted dynamically.
+["Story", "Note", "Task", "Iteration"].each do |class_name|
   eval(<<-EOF % [opts[:pivotal_project_id], opts[:pivotal_api_token]])
     class #{class_name} < ActiveResource::Base
       self.site = "#{PT_BASE_URL}/services/v2/projects/%s"
@@ -212,7 +225,19 @@ end
     end
   EOF
 end
+
+iter_number_to_symbol = { 
+  1 => "✓", ## Done
+  2 => "©", ## current
+  3 => "●", ## Backlog
+}
 Story.send(:include, ToOutput)
+Story.story_to_iteration = Iteration.find(:all).inject({}) do |t, iter|
+  iter.stories.collect do |story| 
+    t.merge!( story.id => iter_number_to_symbol[iter.number] || "?")
+    t
+  end.last
+end
 
 filter = []
 #filter << ["requested_by:'Gerrit Riessen'"] if @only_me
